@@ -125,14 +125,29 @@ def write(text: str) -> bool:
         return False
 
 
+# Statuses _drain can report. The distinction between the last two matters:
+# EOF means the clipboard arrived in full, and a child that is slow to be
+# reaped after that is a scheduling detail, not a failed read.
+DRAIN_COMPLETE = "complete"    # EOF, and the child was reaped
+DRAIN_UNREAPED = "unreaped"    # EOF, but no exit status within the grace
+DRAIN_TIMEOUT = "timeout"      # the deadline passed with the pipe still open
+
+# Reaping a child that has closed its stdout is immediate. This grace is
+# deliberately independent of the read deadline: an earlier version reaped
+# with whatever was left of that deadline, which in the slow-owner case this
+# whole file exists for collapsed to the 2ms floor -- so a clipboard that had
+# been read in full was reported as a failure.
+_REAP_GRACE = 0.1
+
+
 def _drain(
     process: subprocess.Popen,
     timeout: float,
     pump: Callable[[], None] | None,
-) -> tuple[list[bytes], bool]:
+) -> tuple[list[bytes], str]:
     """Read everything wl-paste has to say without ever blocking on it.
 
-    Returns the chunks read and whether the deadline passed first. The pipe is
+    Returns the chunks read and one of the DRAIN_* statuses. The pipe is
     drained as it fills rather than at the end, because a clipboard larger
     than the pipe buffer would otherwise stall wl-paste on the write and look
     exactly like the deadlock this is here to avoid.
@@ -155,15 +170,15 @@ def _drain(
             chunks.append(chunk)
             continue
         if time.monotonic() >= deadline:
-            return chunks, True
+            return chunks, DRAIN_TIMEOUT
         if pump is not None:
             pump()
         select.select([handle], [], [], _POLL_SECONDS)
     try:
-        process.wait(timeout=max(_POLL_SECONDS, deadline - time.monotonic()))
+        process.wait(timeout=_REAP_GRACE)
     except subprocess.TimeoutExpired:
-        return chunks, True
-    return chunks, False
+        return chunks, DRAIN_UNREAPED
+    return chunks, DRAIN_COMPLETE
 
 
 def read(
@@ -198,10 +213,10 @@ def read(
 
     _reading = True
     try:
-        chunks, timed_out = _drain(process, timeout, pump)
+        chunks, status = _drain(process, timeout, pump)
     except Exception as error:  # pylint: disable=broad-exception-caught
         _log.warning("WaylandClipboard: wl-paste failed: %s", error)
-        chunks, timed_out = [], True
+        chunks, status = [], DRAIN_TIMEOUT
     finally:
         _reading = False
         if process.stdout is not None:
@@ -210,31 +225,56 @@ def read(
             except OSError:
                 pass
 
-    if timed_out:
+    if status != DRAIN_COMPLETE:
         process.kill()
         try:
             process.wait(timeout=0.2)
         except subprocess.TimeoutExpired:
             pass
-        _log.warning(
-            "WaylandClipboard: the selection owner did not answer in %.0fms; "
-            "leaving this read to the caller", timeout * 1000)
-        return None
-
-    if process.returncode != 0:
-        # wl-paste exits non-zero when the selection holds nothing it can give
-        # us as text, which is a real answer rather than a failure.
-        return ""
 
     # Decode defensively: the selection is whatever another application put
     # there, and it is not obliged to be valid UTF-8.
     text = b"".join(chunks).decode("utf-8", "replace")
-    if (_last_written is not None
-            and text != _last_written
-            and time.monotonic() - _last_written_at < _WRITE_MEMO_SECONDS):
-        # Inside the handover. What came back is the outgoing owner's value,
-        # measured once as a 300KB string where "" had been expected -- so
-        # this cannot be conditioned on the answer looking empty.
+    # Are we inside the gap between handing wl-copy our text and the
+    # compositor handing it the selection? The *previous* owner is still
+    # answering in there, so whatever came back is on its way out.
+    handover = (_last_written is not None
+                and time.monotonic() - _last_written_at < _WRITE_MEMO_SECONDS)
+
+    if status == DRAIN_TIMEOUT:
+        _log.warning(
+            "WaylandClipboard: the selection owner did not answer in %.0fms; "
+            "leaving this read to the caller", timeout * 1000)
+        return _last_written if handover else None
+
+    if status == DRAIN_UNREAPED:
+        # EOF was reached, so the clipboard arrived in full; only the exit
+        # status is missing. Text in hand is the answer. With no text and no
+        # status there is genuinely nothing to report, which is not the same
+        # as reporting an empty clipboard.
+        if text:
+            return _last_written if (handover and text != _last_written) else text
+        _log.warning("WaylandClipboard: wl-paste gave no text and no exit "
+                     "status; leaving this read to the caller")
+        return _last_written if handover else None
+
+    if process.returncode != 0:
+        # wl-paste exits non-zero when the selection holds nothing it can give
+        # us as text, which is a real answer rather than a failure -- unless we
+        # are mid-handover, in which case the textless thing it asked was the
+        # outgoing owner and the answer is what we just wrote. This check has
+        # to come before the "" return: it used to sit after it, so the memo
+        # could not cover the one case it was built for, an image on the
+        # clipboard replaced by Orca's text.
+        if handover:
+            _log.debug("WaylandClipboard: a textless read inside our own "
+                       "write; answering from what we wrote")
+            return _last_written
+        return ""
+
+    if handover and text != _last_written:
+        # Measured once as a 300KB string where "" had been expected, so this
+        # cannot be conditioned on the answer looking empty.
         _log.debug("WaylandClipboard: read landed inside our own write; "
                    "answering from what we wrote")
         return _last_written

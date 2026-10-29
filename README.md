@@ -96,7 +96,7 @@ None. There is nothing to configure: it either applies or it stands aside.
 ./install.sh && python3 tests-clipboard.py
 ```
 
-27 rows, driving the real selection, because that is the only thing that
+35 rows, driving the real selection, because that is the only thing that
 proves anything here — Orca's own fallback *looks* like it works. Whatever was
 on the clipboard before the run is put back afterwards.
 

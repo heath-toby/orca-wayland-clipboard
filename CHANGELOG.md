@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.2.0
+
+Four fixes from a code review of 1.1.0, one of them destructive.
+
+### `./uninstall.sh --purge` wiped a different add-on's settings
+
+`SETTINGS_NAME` was `"indent-beeper"`, carried over from the project this
+script was adapted from, so `--purge` ran
+`dconf reset -f /org/gnome/orca/default/extensions/indent-beeper/` and then
+reported *"Removed Wayland Clipboard's settings."* It destroyed Indent Beeper's
+tone volume, duration, beep-on-change and beep-while-typing, and this extension
+has no settings of its own to purge in the first place.
+
+`--purge` is gone entirely, and says so if passed. The installer's dependency
+probe was wrong in the same way: it tested for GStreamer with `appsrc` and
+`autoaudiosink` and warned that "the beep will be silent" — in a clipboard
+extension that produces no audio — while never checking `wl-copy` and
+`wl-paste`, which `usable()` makes mandatory. It checks those now, and warns if
+`WAYLAND_DISPLAY` is unset.
+
+### A clipboard that had been read in full could be reported as a failure
+
+After EOF the text is complete and only the child's exit status is outstanding.
+`_drain` reaped with whatever was left of the read deadline, which in the
+slow-owner case this whole file exists for collapses to the 2 ms floor — so a
+read that had succeeded returned `None`, and the caller fell back to Gtk's
+stale local copy or to Orca's broken method.
+
+The reap now has its own 100 ms grace, independent of the read deadline, and
+EOF without an exit status returns the text rather than discarding it. Reaping
+a child that has closed its stdout is immediate; the three outcomes are
+distinguished explicitly as `DRAIN_COMPLETE`, `DRAIN_UNREAPED` and
+`DRAIN_TIMEOUT`.
+
+### The write-handover memo could not cover the case it was built for
+
+The memo answers a read that lands between handing `wl-copy` the text and the
+compositor handing it the selection, because the *previous* owner is still
+answering in there. But the check sat *after* the `returncode != 0` return — so
+when the outgoing owner held no text at all, `read()` reported `""` for text
+that had just been written. Concretely: an image on the clipboard, Orca copies
+text over it, and a read inside the handover says the clipboard is empty. Since
+Orca reads before it appends, that is how an append discards what it appends
+to. The memo check now runs first.
+
+11 new test rows, 35 in all: the three drain outcomes against a process whose
+reaping is controlled, the deadline being its own rather than the reap grace,
+and the image-then-text handover driven against the real selection.
+
 ## 1.1.0
 
 **The read no longer blocks Orca's main loop.** Reported by Toby: *"copying from the

@@ -33,20 +33,25 @@ if ! python3 -c "import orca.extension_loader" 2>/dev/null; then
 fi
 info "Orca with extension support found."
 
-# The beep is generated and pushed through GStreamer, so the Python bindings
-# and a working audio sink are what it actually needs at runtime.
-if ! python3 -c "
-import gi
-gi.require_version('Gst', '1.0')
-from gi.repository import Gst
-Gst.init(None)
-assert Gst.ElementFactory.make('appsrc', None) is not None
-assert Gst.ElementFactory.make('autoaudiosink', None) is not None
-" 2>/dev/null; then
-    warn "GStreamer with appsrc and autoaudiosink not found; the beep will be silent."
-    warn "On most distributions that is gst-plugins-base and gst-plugins-good."
+# What this extension actually needs at runtime: the two wl-clipboard
+# binaries, which clip.py's usable() makes mandatory. This block used to probe
+# GStreamer and warn that "the beep will be silent" -- copied wholesale from a
+# beeper project into an extension that produces no audio at all, naming
+# packages it does not need while never checking the two it does.
+missing=""
+for tool in wl-copy wl-paste; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+    warn "Not found:$missing"
+    warn "Install the wl-clipboard package, or this extension will stand aside."
 else
-    info "GStreamer audio output available."
+    info "wl-copy and wl-paste found."
+fi
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    warn "WAYLAND_DISPLAY is not set in this shell; the extension stands aside"
+    warn "on anything that is not a Wayland session, which is harmless."
 fi
 
 [ -d "$SOURCE_DIR" ] || error "Source directory '$SOURCE_DIR' not found."

@@ -204,6 +204,71 @@ check("...and forgets what it was holding",
       (patches._orig_set_contents, patches._orig_get_contents), (None, None))
 patches.install()
 
+# --- EOF means the data arrived, whatever the child does next ------------
+# _drain used to reap with whatever was left of the read deadline, which in
+# the slow-owner case this file exists for collapsed to the 2ms floor -- so a
+# clipboard that had been read in full was reported as a failure and the
+# caller fell back to a stale copy.
+class FakeProcess:
+    """A process whose output is already written and whose reaping we control."""
+
+    def __init__(self, data, reap=True, close=True):
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, data)
+        if close:
+            os.close(write_fd)
+        else:
+            self._held = write_fd      # left open: EOF never comes
+        self.stdout = os.fdopen(read_fd, "rb", buffering=0)
+        self._reap = reap
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        if not self._reap:
+            raise subprocess.TimeoutExpired("wl-paste", timeout)
+        return 0
+
+    def kill(self):
+        pass
+
+
+chunks, status = clip._drain(FakeProcess(b"all of it"), 0.5, None)
+check("a read that reaches EOF is complete",
+      (b"".join(chunks), status), (b"all of it", clip.DRAIN_COMPLETE))
+
+chunks, status = clip._drain(FakeProcess(b"all of it", reap=False), 0.5, None)
+check("...and EOF without an exit status still has the text",
+      (b"".join(chunks), status), (b"all of it", clip.DRAIN_UNREAPED))
+
+started = time.monotonic()
+chunks, status = clip._drain(FakeProcess(b"partial", close=False), 0.2, None)
+elapsed = time.monotonic() - started
+check("a pipe that never closes times out", status, clip.DRAIN_TIMEOUT)
+check("...at its own deadline, not the reap grace", elapsed < 0.4, True)
+
+pumps = []
+clip._drain(FakeProcess(b"x", close=False), 0.1, lambda: pumps.append(1))
+check("...having pumped while it waited", bool(pumps), True)
+
+# --- a textless outgoing owner, mid-handover -----------------------------
+# The memo check used to sit after the "wl-paste exited non-zero" return, so
+# it could not cover the one case it was built for: an image on the clipboard,
+# replaced by Orca's text, read inside the handover. wl-paste asks the
+# outgoing image owner, gets nothing, and "" was reported for text that had
+# just been written -- which is how an append discards what it appends to.
+image = subprocess.Popen(["wl-copy", "-t", "image/png"], stdin=subprocess.PIPE,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+image.stdin.write(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+image.stdin.close()
+time.sleep(0.5)
+check("an image on the clipboard reads as no text", clip.read(), "")
+clip.write("text that replaced an image")
+check("a textless read inside our own write answers with what we wrote",
+      clip.read(), "text that replaced an image")
+time.sleep(0.4)
+check("...and once the handover is done it reads for real",
+      clip.read(), "text that replaced an image")
+
 # --- put the user's clipboard back --------------------------------------
 if saved_text is not None:
     clip.write(saved_text)

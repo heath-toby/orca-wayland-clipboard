@@ -6,7 +6,7 @@ the hash of every file in the package on each start, so re-approve after
 editing.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from orca.extension import Extension
 
@@ -30,7 +30,7 @@ class WaylandClipboard(Extension):
         "so copying silently does nothing. This routes it through wl-copy and "
         "wl-paste, which speak the data-control protocols made for this case."
     )
-    VERSION = "1.1.0"  # keep in sync with __version__; read by AST, must be a literal
+    VERSION = "1.2.0"  # keep in sync with __version__; read by AST, must be a literal
     AUTHOR = "Toby"
 
     # No preferences: there is nothing to configure. It either applies, on a
