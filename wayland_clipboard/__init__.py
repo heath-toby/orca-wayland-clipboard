@@ -6,7 +6,7 @@ the hash of every file in the package on each start, so re-approve after
 editing.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 from orca.extension import Extension
 
@@ -30,8 +30,12 @@ class WaylandClipboard(Extension):
         "so copying silently does nothing. This routes it through wl-copy and "
         "wl-paste, which speak the data-control protocols made for this case."
     )
-    VERSION = "1.2.0"  # keep in sync with __version__; read by AST, must be a literal
+    VERSION = "1.2.1"  # keep in sync with __version__; read by AST, must be a literal
     AUTHOR = "Toby"
+    # Read by Orca without importing this module, and by Extension Updater
+    # to find this add-on's releases. Orca shows it as a link in
+    # Preferences -> User Extensions -> Info.
+    WEBSITE = "https://github.com/heath-toby/orca-wayland-clipboard"
 
     # No preferences: there is nothing to configure. It either applies, on a
     # Wayland session with wl-clipboard installed, or it stands aside.

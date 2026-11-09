@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1
+
+Declares `WEBSITE`, so [Extension Updater][eu] can find this add-on's
+releases. Orca reads that field with `ast`, without importing the extension,
+and shows it as a link in Preferences -> User Extensions -> Info.
+
+No behaviour changes.
+
+[eu]: https://github.com/heath-toby/orca-extension-updater
+
 ## 1.2.0
 
 Four fixes from a code review of 1.1.0, one of them destructive.
