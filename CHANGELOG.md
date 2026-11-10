@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.2
+
+**The extension had stopped loading entirely, and nothing said so.**
+
+Orca renamed `orca.clipboard` to `orca.clipboard_manager`. This add-on imported
+the old name, so after that Orca update the import raised — and Orca catches a
+failed extension import, logs it at WARNING in the debug log, and carries on
+starting. There is no speech, no braille, no notification and no entry anywhere
+a user would look. The only symptom was that copying from Orca quietly stopped
+working again, exactly as it had before this add-on existed.
+
+The current name is tried first with the old one kept as a fallback. The class
+and both patched method names are unchanged, so nothing else needed to move.
+
+Found because Extension Updater refused to install an update and reported that
+the new version did not load and the old one could not be put back. Both halves
+were true and neither was its fault: the add-on had not been loading for some
+time, and so the restored copy did not load either.
+
 ## 1.2.1
 
 Declares `WEBSITE`, so [Extension Updater][eu] can find this add-on's

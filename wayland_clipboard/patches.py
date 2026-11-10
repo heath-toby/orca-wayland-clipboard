@@ -1,7 +1,8 @@
 """Point Orca's fallback clipboard manager at wl-copy and wl-paste.
 
-``orca.clipboard`` picks a manager at connect time: Klipper, then GPaste 3,
-then GPaste 2, then ``_ClipboardManagerFallback``, which is ``Gtk.Clipboard``.
+``orca.clipboard_manager`` picks a manager at connect time: Klipper, then
+GPaste 3, then GPaste 2, then ``_ClipboardManagerFallback``, which is
+``Gtk.Clipboard``.
 On a Wayland session with none of those managers running, the fallback is what
 you get -- and it does not work (see clip.py).
 
@@ -21,10 +22,21 @@ from __future__ import annotations
 
 import logging
 
-from orca import clipboard
+# Orca renamed this module from `clipboard` to `clipboard_manager`. Until
+# 1.2.2 this add-on imported the old name, so on an Orca that had been updated
+# the import raised and **the whole extension silently failed to load** -- Orca
+# catches a failed import, logs it at WARNING and carries on, so the only
+# symptom was that copying stopped working again. The current name is tried
+# first and the old one kept as a fallback, since the class and both method
+# names are unchanged either way.
+try:
+    from orca import clipboard_manager as clipboard
+except ImportError:  # Orca before the rename
+    from orca import clipboard
 
-# orca.clipboard has already required Gtk 3.0 and Gdk 3.0 by the time this is
-# imported, so these are safe and are the same objects Orca itself holds.
+# orca.clipboard_manager has already required Gtk 3.0 and Gdk 3.0 by the time
+# this is imported, so these are safe and are the same objects Orca itself
+# holds.
 from gi.repository import Gdk, GLib, Gtk
 
 from .clip import PUMP_LIMIT as _PUMP_LIMIT
